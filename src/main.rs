@@ -1,6 +1,12 @@
 use std::env;
 
-use axum::{Json, Router, extract::State, response::IntoResponse, routing::get};
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+};
 use dotenvy::dotenv;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, postgres::PgPoolOptions, prelude::FromRow};
@@ -22,6 +28,7 @@ async fn main() {
     // ConcurrencyLimitLayer::new(20) means maximum 20 concurrent request allowed
     let app = Router::new()
         .route("/todos", get(get_all_todos))
+        .route("/todos/limit-offset", get(get_all_todos_limoff))
         .layer(ConcurrencyLimitLayer::new(20))
         .with_state(db_pool);
 
@@ -48,5 +55,28 @@ async fn get_all_todos(State(pool): State<PgPool>) -> Result<impl IntoResponse, 
         .fetch_all(&pool)
         .await
         .expect("couldn't fetch todos");
-    Ok(Json(todos))
+    Ok((StatusCode::OK, Json(todos)))
+}
+
+#[derive(Debug, Deserialize)]
+struct Pagination {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn get_all_todos_limoff(
+    State(pool): State<PgPool>,
+    Query(pagination): Query<Pagination>,
+) -> Result<impl IntoResponse, String> {
+    let limit = pagination.limit.unwrap_or(20).min(30);
+    let offset = pagination.offset.unwrap_or(0);
+
+    let todos = sqlx::query_as::<_, Todo>(r#"SELECT * FROM todos LIMIT $1 OFFSET $2"#)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&pool)
+        .await
+        .expect("couldn't fetch todos");
+
+    Ok((StatusCode::OK, Json(todos)))
 }
