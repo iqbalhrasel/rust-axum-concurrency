@@ -29,6 +29,7 @@ async fn main() {
     let app = Router::new()
         .route("/todos", get(get_all_todos))
         .route("/todos/limit-offset", get(get_all_todos_limoff))
+        .route("/todos/page", get(get_all_todos_page))
         .layer(ConcurrencyLimitLayer::new(20))
         .with_state(db_pool);
 
@@ -73,6 +74,31 @@ async fn get_all_todos_limoff(
 
     let todos = sqlx::query_as::<_, Todo>(r#"SELECT * FROM todos LIMIT $1 OFFSET $2"#)
         .bind(limit)
+        .bind(offset)
+        .fetch_all(&pool)
+        .await
+        .expect("couldn't fetch todos");
+
+    Ok((StatusCode::OK, Json(todos)))
+}
+
+#[derive(Debug, Deserialize)]
+struct PageQuery {
+    page: Option<i64>,
+    size: Option<i64>,
+}
+
+// zero based page
+async fn get_all_todos_page(
+    State(pool): State<PgPool>,
+    Query(page_query): Query<PageQuery>,
+) -> Result<impl IntoResponse, String> {
+    let size = page_query.size.unwrap_or(20).min(30).max(1);
+    let page = page_query.page.unwrap_or(0).max(0);
+    let offset = size * page;
+
+    let todos = sqlx::query_as::<_, Todo>(r#"SELECT * FROM todos LIMIT $1 OFFSET $2"#)
+        .bind(size)
         .bind(offset)
         .fetch_all(&pool)
         .await
