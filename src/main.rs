@@ -30,6 +30,7 @@ async fn main() {
         .route("/todos", get(get_all_todos))
         .route("/todos/limit-offset", get(get_all_todos_limoff))
         .route("/todos/page", get(get_all_todos_page))
+        .route("/todos/cursor", get(get_all_todos_cursor))
         .layer(ConcurrencyLimitLayer::new(20))
         .with_state(db_pool);
 
@@ -103,6 +104,30 @@ async fn get_all_todos_page(
         .fetch_all(&pool)
         .await
         .expect("couldn't fetch todos");
+
+    Ok((StatusCode::OK, Json(todos)))
+}
+
+#[derive(Debug, Deserialize)]
+struct CursorQuery {
+    cursor: Option<i64>,
+    size: Option<i64>,
+}
+// cursor based query pagination
+async fn get_all_todos_cursor(
+    State(pool): State<PgPool>,
+    Query(cq): Query<CursorQuery>,
+) -> Result<impl IntoResponse, String> {
+    let size = cq.size.unwrap_or(20).min(30);
+    let cursor = cq.cursor.unwrap_or(0);
+
+    let todos =
+        sqlx::query_as::<_, Todo>(r#"SELECT * FROM todos WHERE id>$1 ORDER BY id LIMIT $2"#)
+            .bind(cursor)
+            .bind(size)
+            .fetch_all(&pool)
+            .await
+            .expect("couldn't fetch todos");
 
     Ok((StatusCode::OK, Json(todos)))
 }
